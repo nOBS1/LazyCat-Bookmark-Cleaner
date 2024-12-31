@@ -95,18 +95,60 @@ class NetworkTimeoutManager {
 // 创建超时管理器实例
 const timeoutManager = new NetworkTimeoutManager();
 
+// 添加白名单配置
+const WHITELIST_DOMAINS = [
+  'github.com',
+  'gitlab.com',
+  'bitbucket.org',
+  'notion.so',
+  'feishu.cn',
+  'yuque.com',
+  'figma.com',
+  'atlassian.com',
+  'jira.com',
+  'confluence.com',
+  'medium.com',
+  'dev.to',
+  'stackoverflow.com',
+  'zhihu.com',
+  'juejin.cn',
+  'csdn.net'
+];
+
+// 添加白名单检查函数
+function isWhitelisted(url) {
+  try {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname.toLowerCase();
+    
+    // 检查完整域名和子域名
+    return WHITELIST_DOMAINS.some(whitelistedDomain => 
+      domain === whitelistedDomain || 
+      domain.endsWith('.' + whitelistedDomain)
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
 async function checkUrlOnce(url) {
   const startTime = Date.now();
   console.group(`🔍 Checking URL: ${url}`);
-  console.log(`⏱️ Start Time: ${new Date(startTime).toLocaleTimeString()}`);
   
-  const specialProtocols = [
-    'chrome:', 'chrome-extension:', 'edge:', 'about:', 
-    'file:', 'data:', 'javascript:', 'brave:'
-  ];
-
   try {
     const urlObj = new URL(url);
+    
+    // 添加白名单检查
+    if (isWhitelisted(url)) {
+      console.log(`✅ Whitelisted domain: ${urlObj.hostname}`);
+      console.groupEnd();
+      return {
+        isValid: true,
+        reason: 'Whitelisted domain'
+      };
+    }
+
+    // 特殊协议检查
     if (specialProtocols.some(protocol => url.startsWith(protocol))) {
       console.log(`🔒 Special protocol detected: ${urlObj.protocol}`);
       console.groupEnd();
@@ -116,237 +158,8 @@ async function checkUrlOnce(url) {
       };
     }
 
+    // 使用 fetch 发送请求验证 URL
     return new Promise((resolve, reject) => {
-      let finalUrl = url;
-      let isResolved = false;
-      let hasResponse = false;
-      let requestLog = {
-        startTime,
-        endTime: null,
-        duration: null,
-        redirects: [],
-        errors: [],
-        statusCode: null,
-        finalUrl: null,
-        attempts: 0
-      };
-
-      const logRequestResult = () => {
-        requestLog.endTime = Date.now();
-        requestLog.duration = requestLog.endTime - requestLog.startTime;
-        
-        console.log('📊 Request Summary:');
-        console.table({
-          'Duration': `${requestLog.duration}ms`,
-          'Has Response': hasResponse,
-          'Status Code': requestLog.statusCode,
-          'Redirects': requestLog.redirects.length,
-          'Errors': requestLog.errors.length,
-          'Final URL': requestLog.finalUrl || url
-        });
-
-        if (requestLog.redirects.length > 0) {
-          console.log('↪️ Redirects:');
-          console.table(requestLog.redirects);
-        }
-
-        if (requestLog.errors.length > 0) {
-          console.log('❌ Errors:');
-          console.table(requestLog.errors);
-        }
-      };
-
-      const errorListener = (details) => {
-        if (isResolved) return;
-        hasResponse = true;
-        requestLog.errors.push({
-          error: details.error,
-          timestamp: Date.now(),
-          timeTaken: Date.now() - startTime
-        });
-        
-        console.log(`❌ Error detected: ${details.error}`);
-        
-        const connectionErrors = [
-          'net::ERR_SOCKET_NOT_CONNECTED',
-          'net::ERR_CONNECTION_CLOSED',
-          'net::ERR_CONNECTION_RESET',
-          'net::ERR_CONNECTION_REFUSED',
-          'net::ERR_CONNECTION_TIMED_OUT'
-        ];
-
-        const accessErrors = [
-          'net::ERR_NETWORK_ACCESS_DENIED',
-          'net::ERR_BLOCKED_BY_RESPONSE',
-          'net::ERR_BLOCKED_BY_CLIENT'
-        ];
-
-        const certErrors = [
-          'net::ERR_CERT_COMMON_NAME_INVALID',
-          'net::ERR_CERT_AUTHORITY_INVALID',
-          'net::ERR_CERT_DATE_INVALID'
-        ];
-
-        if (connectionErrors.includes(details.error)) {
-          const alternateUrl = new URL(url);
-          alternateUrl.protocol = urlObj.protocol === 'https:' ? 'http:' : 'https:';
-          console.log(`💡 Suggestion: Try ${alternateUrl.protocol} protocol`);
-          
-          resolveResult({
-            isValid: true,
-            reason: `Connection failed, might be temporary or try ${alternateUrl.protocol.slice(0, -1)}`,
-            alternateUrl: alternateUrl.toString()
-          });
-        }
-        else if (accessErrors.includes(details.error)) {
-          resolveResult({ 
-            isValid: true,
-            reason: 'Site blocks automated access but might be accessible in browser'
-          });
-        }
-        else if (certErrors.includes(details.error)) {
-          resolveResult({ 
-            isValid: true,
-            reason: 'Site has certificate issues but might be accessible'
-          });
-        }
-        else {
-          resolveResult({
-            isValid: false,
-            reason: details.error
-          });
-        }
-      };
-
-      const redirectListener = (details) => {
-        hasResponse = true;
-        requestLog.redirects.push({
-          from: details.url,
-          to: details.redirectUrl,
-          timestamp: Date.now(),
-          timeTaken: Date.now() - startTime
-        });
-        finalUrl = details.redirectUrl;
-        requestLog.finalUrl = finalUrl;
-        console.log(`↪️ Redirect: ${details.url} -> ${details.redirectUrl}`);
-      };
-
-      const listener = (details) => {
-        if (isResolved) return;
-        hasResponse = true;
-        recordResponseTime(); // 记录响应时间
-        requestLog.statusCode = details.statusCode;
-        console.log(`✅ Response received: Status ${details.statusCode}`);
-        
-        if (details.statusCode >= 200 && details.statusCode < 300) {
-            resolveResult({ isValid: true });
-        }
-        else if (details.statusCode >= 300 && details.statusCode < 400) {
-            if (finalUrl && finalUrl !== url) {
-                resolveResult({ 
-                    isValid: true,
-                    redirectUrl: finalUrl,
-                    reason: `Redirected to ${finalUrl}`
-                });
-            } else {
-                resolveResult({ isValid: false, reason: 'Redirect without target' });
-            }
-        }
-        else if ([401, 403, 429].includes(details.statusCode)) {
-            resolveResult({ 
-                isValid: true,
-                reason: getStatusCodeReason(details.statusCode)
-            });
-        }
-        else {
-            resolveResult({
-                isValid: false,
-                reason: `HTTP Error: ${details.statusCode}`
-            });
-        }
-      };
-
-      const resolveResult = (result) => {
-        if (!isResolved) {
-          isResolved = true;
-          clearTimeout(timeout);
-          removeListeners();
-          
-          logRequestResult();
-          console.log(`🏁 Final result:`, result);
-          console.groupEnd();
-          
-          resolve(result);
-        }
-      };
-
-      const removeListeners = () => {
-        if (!isResolved) {
-          chrome.webRequest.onCompleted.removeListener(listener);
-          chrome.webRequest.onErrorOccurred.removeListener(errorListener);
-          chrome.webRequest.onBeforeRedirect.removeListener(redirectListener);
-        }
-      };
-
-      const urlPatterns = [
-        url,
-        url.replace('http://', 'https://'),
-        url.replace('https://', 'http://')
-      ];
-
-      chrome.webRequest.onResponseStarted.addListener(
-        listener,
-        { urls: urlPatterns, types: ['main_frame', 'xmlhttprequest'] }
-      );
-
-      chrome.webRequest.onBeforeRedirect.addListener(
-        redirectListener,
-        { urls: urlPatterns, types: ['main_frame', 'xmlhttprequest'] }
-      );
-
-      chrome.webRequest.onCompleted.addListener(
-        listener,
-        { urls: urlPatterns, types: ['main_frame', 'xmlhttprequest'] }
-      );
-
-      chrome.webRequest.onErrorOccurred.addListener(
-        errorListener,
-        { urls: urlPatterns, types: ['main_frame', 'xmlhttprequest'] }
-      );
-
-      const controller = new AbortController();
-      const signal = controller.signal;
-
-      const timeout = setTimeout(() => {
-        if (!isResolved) {
-          const timeElapsed = Date.now() - startTime;
-          console.warn(`⚠️ Request timeout after ${timeElapsed}ms`);
-          console.log(`Response received: ${hasResponse}`);
-          
-          if (!hasResponse) {
-            controller.abort();
-            removeListeners();
-            resolve({
-              isValid: false,
-              reason: 'Request Timeout'
-            });
-          } else {
-            resolveResult({
-              isValid: true,
-              reason: 'Site is responding but slow'
-            });
-          }
-        }
-      }, timeoutManager.getTimeout());
-
-      // 在成功接收响应时记录响应时间
-      const recordResponseTime = () => {
-        if (!isResolved) {
-          const responseTime = Date.now() - startTime;
-          timeoutManager.addSample(responseTime);
-        }
-      };
-
       fetch(url, {
         method: 'GET',
         signal: controller.signal,
@@ -355,15 +168,7 @@ async function checkUrlOnce(url) {
         },
         mode: 'no-cors',
         cache: 'no-cache'
-      }).catch((error) => {
-        console.log(`🔄 Fetch error:`, error);
-        requestLog.errors.push({
-          type: 'fetch',
-          error: error.message,
-          timestamp: Date.now(),
-          timeTaken: Date.now() - startTime
-        });
-      });
+      })
     });
   } catch (error) {
     console.error(`❌ URL parsing error:`, error);
@@ -487,7 +292,6 @@ async function checkUrlWithRetry(url, maxRetries = 2) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       if (i > 0) {
-        console.log(`[Retry ${i}] Checking ${url}`);
         await new Promise(resolve => setTimeout(resolve, 2000 * i));
       }
       
@@ -516,3 +320,64 @@ function isRetryableError(error) {
   ];
   return retryableErrors.some(e => error?.includes(e));
 }
+
+// 添加白名单管理功能
+class WhitelistManager {
+  constructor() {
+    this.customWhitelist = new Set();
+  }
+
+  // 从存储加载自定义白名单
+  async loadCustomWhitelist() {
+    try {
+      const result = await chrome.storage.local.get('customWhitelist');
+      if (result.customWhitelist) {
+        this.customWhitelist = new Set(result.customWhitelist);
+      }
+    } catch (error) {
+      console.error('Error loading custom whitelist:', error);
+    }
+  }
+
+  // 保存自定义白名单到存储
+  async saveCustomWhitelist() {
+    try {
+      await chrome.storage.local.set({
+        customWhitelist: Array.from(this.customWhitelist)
+      });
+    } catch (error) {
+      console.error('Error saving custom whitelist:', error);
+    }
+  }
+
+  // 添加域名到自定义白名单
+  async addDomain(domain) {
+    domain = domain.toLowerCase().trim();
+    if (!this.customWhitelist.has(domain)) {
+      this.customWhitelist.add(domain);
+      await this.saveCustomWhitelist();
+    }
+  }
+
+  // 从自定义白名单移除域名
+  async removeDomain(domain) {
+    domain = domain.toLowerCase().trim();
+    if (this.customWhitelist.has(domain)) {
+      this.customWhitelist.delete(domain);
+      await this.saveCustomWhitelist();
+    }
+  }
+
+  // 检查域名是否在白名单中
+  isDomainWhitelisted(domain) {
+    domain = domain.toLowerCase().trim();
+    return WHITELIST_DOMAINS.includes(domain) || 
+           this.customWhitelist.has(domain);
+  }
+}
+
+// 创建白名单管理器实例
+const whitelistManager = new WhitelistManager();
+
+// 初始化时加载自定义白名单
+whitelistManager.loadCustomWhitelist();
