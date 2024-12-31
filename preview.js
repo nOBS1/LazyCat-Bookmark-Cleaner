@@ -166,16 +166,21 @@ class BookmarkPreview {
     }
 
     show(url) {
-        if (this.currentUrl === url) return;
-        
-        if (this.hideTimeout) {
-            clearTimeout(this.hideTimeout);
+        if (this.isUrlSafe(url)) {
+            this.frame.src = url;
+        } else {
+            console.error('Unsafe URL detected');
+            this.title.textContent = 'Invalid URL';
         }
-        
-        this.currentUrl = url;
-        this.title.textContent = 'Loading preview...';
-        this.frame.src = url;
-        this.container.style.display = 'block';
+    }
+
+    isUrlSafe(url) {
+        try {
+            const urlObj = new URL(url);
+            return ['http:', 'https:'].includes(urlObj.protocol);
+        } catch {
+            return false;
+        }
     }
 
     hide() {

@@ -375,7 +375,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
-async function scanBookmarks(node, path = [], counter = { count: 0, total: 0, shouldCancel: () => false }) {
+async function scanBookmarks(node, path = [], counter = { count: 0, total: 0 }) {
     try {
         if (counter.shouldCancel()) {
             throw new Error('Scan cancelled');
@@ -1516,6 +1516,21 @@ function initCatInteraction() {
             }, 300);
         }, 2000);
     });
+}
+
+async function scanBookmarksInBatches(node, batchSize = 100) {
+    const bookmarks = [];
+    const collectBookmarks = (node) => {
+        if (node.url) bookmarks.push(node);
+        if (node.children) node.children.forEach(collectBookmarks);
+    };
+    collectBookmarks(node);
+    
+    for (let i = 0; i < bookmarks.length; i += batchSize) {
+        const batch = bookmarks.slice(i, i + batchSize);
+        await processBatch(batch);
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
 }
 
 

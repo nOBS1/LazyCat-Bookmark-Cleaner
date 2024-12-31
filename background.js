@@ -381,3 +381,22 @@ const whitelistManager = new WhitelistManager();
 
 // 初始化时加载自定义白名单
 whitelistManager.loadCustomWhitelist();
+
+async function checkUrlWithTimeout(url, timeout = 6000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+        const response = await fetch(url, {
+            signal: controller.signal
+        });
+        return { isValid: response.ok };
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            return { isValid: false, reason: 'Timeout' };
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}

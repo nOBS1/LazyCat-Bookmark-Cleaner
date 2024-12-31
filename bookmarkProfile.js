@@ -5,8 +5,13 @@ console.log('BookmarkProfile module loaded');
 
 // 添加获取存储的昵称函数
 async function getNickname() {
-    const result = await chrome.storage.local.get('bookmarkProfileNickname');
-    return result.bookmarkProfileNickname;
+    try {
+        const result = await chrome.storage.local.get('bookmarkProfileNickname');
+        return result.bookmarkProfileNickname;
+    } catch (error) {
+        console.error('Error getting nickname:', error);
+        return null;
+    }
 }
 
 // 添加设置昵称函数
